@@ -1,0 +1,4 @@
+interface:
+  display_name: "WinDbg 转储分析报告"
+  short_description: "Windows dump crash hang memory CPU analysis reports"
+  default_prompt: "Use $windbg-analysis to compare these Windows dumps and write one evidence-based report to output/."
