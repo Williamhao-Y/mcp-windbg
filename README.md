@@ -69,7 +69,26 @@ Parameters, timeouts, and the built-in triage prompts are in the [tools referenc
 > [!TIP]
 > In enterprise environments, MCP server usage might be restricted by organizational policies. Check with your IT team about AI tool usage and ensure you have the necessary permissions before proceeding.
 
-**Install**
+### Install with Codex (recommended)
+
+Give the following prompt to an AI tool when you want it to install this MCP server for Codex in the current working directory:
+
+```text
+First read the README and user guide for the GitHub repository https://github.com/Williamhao-Y/mcp-windbg, then install and configure mcp-windbg in the current working directory for use by Codex.
+
+Requirements:
+1. Prefer an isolated setup within the working directory: keep the Python runtime, virtual environment, dependency cache, and symbol cache in or as close as practical to the current directory. Do not modify the system PATH, registry, system Python, or install global pip packages.
+2. Do not assume the server is installed merely because you read the GitHub repository. You may install the published package from PyPI according to the guide. The launch method must use the working-directory Python to run `python -m mcp_windbg`.
+3. First check whether `cdb.exe` and `kd.exe` already exist on this machine. If found, pass their absolute paths explicitly in the configuration instead of relying on PATH.
+4. Configure the symbol cache in the current directory, for example `.windbg-symbols`, and use Microsoft's official symbol server.
+5. The MCP server is for Codex only. Prefer writing to `.codex/config.toml` in the current directory. If Codex must use a user-level setting to mark the current directory as trusted before it can load project configuration, that is allowed; however, do not register mcp-windbg as a global MCP server for every project.
+6. After installation, verify that the private Python can import both `ssl` and `mcp_windbg`, and that `python -m mcp_windbg --help` succeeds. If PyPI resolves an incompatible MCP 2.x release, pin a compatible MCP 1.x release.
+7. Do not leave the MCP server running in a terminal waiting for protocol input. Explain how to use `open_cdb_dump` in a new Codex session to analyze dump files in the current directory.
+8. Before any action that expands into user-level or system-level configuration, requires downloading a standalone Python runtime, or has uncertain configuration, ask me first.
+9. Report when finished: files changed, the actual MCP launch command, WinDbg paths, symbol-cache location, validation results, and anything not yet verified.
+```
+
+### Manual installation
 
 ```bash
 pip install mcp-windbg
