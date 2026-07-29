@@ -27,7 +27,7 @@
 
 - Windows。
 - 已安装 [Debugging Tools for Windows](https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/) 或 Microsoft Store 版 [WinDbg](https://apps.microsoft.com/detail/9pgjgd53tn86)，并具备 `cdb.exe`；使用内核调试还需要 `kd.exe`。
-- Python 3.10 或更高版本。
+- Python 3.10 或更高版本。推荐使用 [uv](https://docs.astral.sh/uv/) 安装和管理 **Python 3.12 x64**；它将运行时、虚拟环境和依赖隔离在项目目录内，避免污染系统 Python。除非有明确兼容性验证，不建议优先使用刚发布的 Python 大版本。
 - 一个支持 MCP 的 AI 客户端，例如 Codex、Claude Code、GitHub Copilot、Claude Desktop、Cursor、Windsurf 或 Cline。
 
 服务会尝试自动发现调试器。若调试器路径不在常见位置，建议显式传入 `--cdb-path` 和（需要内核调试时）`--kd-path` 的绝对路径，避免依赖系统 `PATH`。
@@ -55,7 +55,17 @@
 
 ### 手动安装
 
-最简单的安装方式：
+推荐使用 uv，在项目目录创建隔离环境后安装：
+
+```powershell
+winget install --id Astral.uv
+uv python install 3.12
+uv venv --python 3.12 .venv
+uv pip install mcp-windbg
+.\.venv\Scripts\python.exe -m mcp_windbg --help
+```
+
+上述方式不会修改系统 `PATH` 或安装全局 pip 包。若已自行维护 Python 环境，也可使用 pip 直接安装：
 
 ```powershell
 python -m pip install mcp-windbg
