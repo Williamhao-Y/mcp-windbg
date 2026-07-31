@@ -36,22 +36,7 @@
 
 ### 使用 Codex 安装（推荐）
 
-需要让 AI 工具在当前工作目录为 Codex 安装本 MCP 时，请完整提供以下提示词：
-
-```text
-请先阅读 GitHub 仓库 https://github.com/Williamhao-Y/mcp-windbg 的 README 和使用手册，然后在当前工作目录安装并配置 mcp-windbg，供 Codex 使用。
-
-要求：
-1. 优先采用工作目录内的隔离方案：Python 运行时、虚拟环境、依赖缓存、符号缓存都尽量放在当前目录下；不要修改系统 PATH、注册表、系统 Python，也不要安装全局 pip 包。
-2. 不要只阅读 GitHub 仓库后假设已安装：可以按手册从 PyPI 安装发布包；启动方式应使用工作目录内的 Python 执行 `python -m mcp_windbg`。
-3. 先检查本机是否已有 `cdb.exe`、`kd.exe`；若存在，配置时显式传入其绝对路径，避免依赖 PATH。
-4. 将符号缓存配置在当前目录，例如 `.windbg-symbols`，符号服务器使用微软官方地址。
-5. MCP 仅供 Codex 使用。优先写入当前目录的 `.codex/config.toml`；如 Codex 必须通过用户级配置标记当前目录为 trusted 才能加载项目配置，可以这样做，但不要把 mcp-windbg 注册成对所有项目生效的全局 MCP。
-6. 安装后验证：私有 Python 能导入 `ssl` 和 `mcp_windbg`，并确认 `python -m mcp_windbg --help` 能正常执行。若 PyPI 自动解析到不兼容的 MCP 2.x，请固定为与 mcp-windbg 兼容的 MCP 1.x。
-7. 不要启动 MCP 后一直挂在终端等待协议输入；说明在新开的 Codex 会话中如何通过 `open_cdb_dump` 分析当前目录的 dump 文件。
-8. 任何会扩大到用户级或系统级配置、需要下载独立 Python、或无法确定的配置，请先询问我。
-9. 完成后报告：改动了哪些文件、MCP 实际启动命令、WinDbg 路径、符号缓存位置、验证结果，以及尚未验证的项。
-```
+需要让 AI 工具在当前工作目录为 Codex 安装本 MCP 时，请使用独立的[AI 安装提示词](PROMPT-CODEX-INSTALL.md)。它会要求 AI 下载 `docs/redact.py` 到当前目录，并将其绝对路径作为 `--filter-script` 追加到 MCP 的 `args` 列表中。
 
 ### 手动安装
 
