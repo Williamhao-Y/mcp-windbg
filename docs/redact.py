@@ -17,6 +17,10 @@ JWT = re.compile(
     r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"
 )
 
+WINDOWS_USER_PATH = re.compile(
+    r"(?i)\bC:\\Users\\[^\\\r\n]+"
+)
+
 # 常见的 key=value 秘密
 KEY_VALUE_SECRET = re.compile(
     r"""(?ix)
