@@ -1,6 +1,6 @@
 # Codex AI Installation Prompt
 
-Copy the prompt in the language you prefer and give it to an AI tool.
+Please read this link（ https://github.com/Williamhao-Y/mcp-windbg/blob/main/PROMPT-CODEX-INSTALL.md ）Install MCP Windbg
 
 ## 中文
 
