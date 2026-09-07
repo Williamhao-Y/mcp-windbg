@@ -41,7 +41,7 @@
 
 ### 使用 Codex 安装（推荐）
 
-需要让 AI 工具在当前工作目录为 Codex 安装本 MCP 时，请使用独立的[AI 安装提示词](PROMPT-CODEX-INSTALL.md)。这是 `Williamhao-Y/mcp-windbg` 提供的 fork 特有集成：它会配置 MCP、下载 `docs/redact.py`，并把 `windbg-analysis` Skill 安装到目标项目的 `.agents/skills/windbg-analysis/`。
+需要让 AI 工具在当前工作目录为 Codex 安装本 MCP 时，请使用独立的[AI 安装提示词](PROMPT-CODEX-INSTALL.md)。这是 `Williamhao-Y/mcp-windbg` 提供的 fork 特有集成：它会配置 MCP、下载 `docs/redact.py`，并把 `windbg-analysis` Skill 安装到目标项目的 `.codex/skills/windbg-analysis/`。
 
 ### 手动安装
 

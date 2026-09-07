@@ -113,7 +113,7 @@ Needs Python 3.10 or higher. The tools are identical; the skills and the agent a
 Use the standalone [AI installation prompt](PROMPT-CODEX-INSTALL.md) when you want an AI tool to
 configure this MCP server for Codex in the current working directory. It installs the server,
 downloads the redaction helper, and installs the repository-scoped `windbg-analysis` skill under
-`.agents/skills/windbg-analysis/`.
+`.codex/skills/windbg-analysis/`.
 
 ## Install in another client
 
