@@ -5,6 +5,175 @@ All notable changes to the MCP Server for WinDbg Crash Analysis project will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-09-05
+
+### Fixed
+
+- **Unicode command output on Chinese, Japanese and Korean Windows** ([#102](https://github.com/svnscha/mcp-windbg/issues/102)) - on a multibyte system code page (936, 932, 949, or the "Use Unicode UTF-8" setting 65001) the debugger truncates its text output over a pipe, dropping the tail of any line that contains non-ASCII text; a `du` of a Chinese string came back empty or partial, other Unicode output was cut short, and a line split in the middle of a character could leave the session unresponsive. On these code pages the session now mirrors output to a UTF-16 log and reads each command's output from it, keyed by the markers it already uses to synchronize; the result is complete for every command. Single-byte code pages (such as Western 1252), where the pipe is lossless, are detected and left on the pipe path unchanged.
+
+## [1.2.1] - 2026-08-27
+
+### Changed
+
+- **The README install section is organised by client, not by install method** - Claude Code
+  has its own heading, with the plugin and a manual `claude mcp add` beneath it, and other
+  clients follow. Python is no longer listed as a prerequisite, because it is not one for the
+  plugin route: each route now states what it needs next to the command it applies to. The note
+  about enterprise policy moves to the top, where it can still change whether you proceed.
+
+### Fixed
+
+- **A corrupted path in the README example prompts** - `C:\dumps\app.dmp` shipped with a literal
+  BEL byte where the `\a` should have been, so anyone copying that line got a control character
+  instead of a path. Every markdown, workflow and JSON file in the repository was swept for
+  stray control characters; this was the only one.
+
+## [1.2.0] - 2026-08-27
+
+### Added
+
+- **A Claude Code plugin, and a marketplace to serve it from this repo** - installing is now two
+  lines with no `pip install` and no MCP configuration to hand-edit:
+
+  ```
+  /plugin marketplace add svnscha/mcp-windbg
+  /plugin install mcp-windbg-uvx@mcp-windbg
+  ```
+
+  The plugin launches the server with `uvx`, which fetches the pinned version from PyPI on first
+  use, so the only prerequisites are Windows, CDB, and uv.
+
+  It ships the ten tools, four skills - `analyze-dump`, `debug-remote`, `kernel-debug`, and
+  `windbg-doctor` for diagnosing a machine that cannot debug - and a `crash-analyst` agent that
+  investigates a dump on its own and returns a verdict with its evidence, what it ruled out, and
+  what to do next. Always-on context cost is about 400 tokens; a skill or agent costs more only
+  when it fires.
+
+  Symbols work out of the box: the plugin supplies the Microsoft symbol server as a *default* for
+  `_NT_SYMBOL_PATH`, and an existing value wins over it, so a symbol path you tuned yourself is
+  never overwritten.
+
+### Changed
+
+- **Dependency floors raised to current releases** - `mcp` 2.1.1, `starlette` 1.6.0, `uvicorn`
+  0.52.4, and `pymdown-extensions` 11.0.2 for the docs build. The major-version caps are
+  unchanged, and `uv.lock` is regenerated to match; it had been left at 1.0.1 since the 1.1.0
+  release, because release-please has no updater for it.
+
+### Fixed
+
+- **The `crash-analyst` agent no longer hard-codes the plugin's installed name** - its `tools:`
+  list named MCP tools as `mcp__plugin_mcp-windbg_mcp-windbg__*`, and that middle segment is the
+  name the plugin is installed under. Under any marketplace entry not called exactly
+  `mcp-windbg` the list would have matched nothing, leaving the agent with no debugger tools at
+  all. It now denies the mutating tools instead, which keeps it read-only without naming the
+  plugin.
+
+- **The version-consistency check reports mismatches instead of crashing on them** - it looped
+  with `foreach ($error in $errors)`, and `$error` is a read-only PowerShell automatic variable,
+  so the moment it had something to report it threw "Cannot overwrite variable Error" and lost
+  the diagnostic. The build still failed, but never said which files disagreed. It now also
+  covers the plugin manifest, the marketplace entry, and the server version pinned in the
+  plugin's `.mcp.json`.
+
+## [1.1.0] - 2026-08-22
+
+### Changed
+
+- **Runs on the mcp 2.x SDK** - the requirement is now `mcp>=2.0.0`, up from the `<2.0.0` cap
+  1.0.1 shipped as a stopgap. 2.0.0 removed the low-level `@server.list_tools()` /
+  `@server.call_tool()` decorators this server registered its tools through, so the handlers are
+  now passed to `Server(...)` directly and return the SDK's result types (`ListToolsResult`,
+  `CallToolResult`) instead of bare lists. `McpError` is `MCPError`, and it takes a code and a
+  message rather than an `ErrorData`. None of this is visible to clients: the same nine tools
+  with the same schemas, over both stdio and streamable-http (#78).
+
+  Installing mcp-windbg pulls the SDK it needs, so there is nothing to do on upgrade. Python
+  support is unchanged - the 2.x SDK requires 3.10+, exactly as this project already did.
+- **Every runtime dependency is capped at the next major** - `mcp<3.0.0`, `pydantic<3.0.0`,
+  `starlette<2.0.0`, `uvicorn<1.0.0`. #76 happened because `mcp>=1.28.1` had no upper bound, so
+  the 2.0.0 release landed in fresh installs and broke them at import; moving the floor to 2.x
+  without a ceiling would have left the identical trap for 3.0.0. mcp-windbg is an application
+  rather than a library, so an upper bound cannot cause a diamond conflict for anyone, and it
+  turns the next breaking SDK release into a Dependabot PR that fails CI instead of an install
+  everybody has to work around by hand.
+- **A weekly canary tests the versions users will actually get** - CI installs from `uv.lock`, so
+  it only ever proved the server works against the exact versions pinned there, while a PyPI
+  install resolves to whatever the ranges allow. `dependency-canary.yml` closes that gap: it
+  resolves to the newest allowed versions, ignoring the lock, and runs the hermetic suite against
+  them every Monday. It is scheduled rather than attached to pull requests on purpose - an
+  upstream release breaking the build should page the maintainer, not block someone's unrelated PR.
+
+### Added
+
+- **`wait_for_break`** - block until a target you resumed stops again (bugcheck, breakpoint, or a
+  CTRL+BREAK from elsewhere) and return everything the debugger printed when it did. If the wait
+  expires the target is left running, so waiting never halts a machine behind your back.
+
+### Fixed
+
+- **`g` no longer freezes the target it was supposed to release** - go-class commands (`g`, `gh`,
+  `gn`, `gN`, `gc`, `gu`) hand the CPU back to the target, after which the debugger stops reading
+  its stdin. The marker protocol queued an `.echo` the debugger could not answer, so the command
+  hit its timeout and the cancel-on-timeout CTRL+BREAK halted the target again - the exact
+  opposite of what was asked. They are now written bare and return immediately. The step family
+  (`p`, `t`, `pa`, `ta`, ...) is unaffected: it returns to the prompt on its own and keeps the
+  marker round-trip (#74).
+- **An ordinary command after `g` breaks in by itself** - no need to interleave `send_ctrl_break`
+  manually, and whatever the target printed on the way to stopping leads that command's output
+  instead of being discarded.
+- **A break-in issued the instant `g` returns is no longer swallowed** - resuming wrote the `g`
+  and returned without waiting for the debugger to read it, so for a moment the debugger was
+  still sitting at its prompt with the resume unread. A CTRL+BREAK arriving in that window was
+  answered by the prompt instead of reaching the target, and the break was simply lost: the
+  caller then waited out a full `wait_for_break` timeout on a machine nothing was going to stop.
+  Measured against a live KDNET target, a break sent with no gap after `g` was lost every single
+  time. The resume is now confirmed consumed before it is reported. A go-class command that stops
+  again at once - a `gu` returning in microseconds, a breakpoint hit immediately - reports what it
+  printed instead of claiming the target is running.
+- **Break-in asks before it signals** - a CTRL+BREAK aimed at a target that has in fact already
+  stopped queues a break request a kernel target honours later, re-halting a machine we thought
+  we had released. The session probes for a prompt first and only signals if that goes
+  unanswered, which also makes `send_ctrl_break` safe to issue speculatively.
+- **`wait_for_break` trusts the debugger, not a flag** - it is right about a target running for
+  reasons this server never caused, and a second `g` while the target really is still running is
+  refused rather than queued behind the first.
+- **`bp nt!X; g` reports whether the breakpoint was set** - the part before the `g` runs with its
+  output returned, so a typo'd symbol surfaces as `Couldn't resolve error` rather than as a wait
+  for a break that can never arrive. A `;` inside a quoted command string is left alone.
+- **Output is no longer lost at a deadline** - a marker that lands in the moment between a timeout
+  expiring and being handled now counts as arrived, and the break-in output a timed-out command
+  was carrying rides along on the error instead of vanishing with it.
+- **One operation at a time per session** - `wait_for_break` parks for minutes on a worker thread
+  so the rest of the server keeps answering; a second call against the same session is refused
+  at once, with a message pointing at `send_ctrl_break`, rather than interleaving markers and
+  returning each other's output. The refusal never waits, so it cannot stall the server it exists
+  to keep responsive.
+- **Closing a session ends a wait parked on it** - instead of leaving a thread sitting out its
+  full timeout on a debugger that no longer exists and then reporting the target as still running.
+- **Kernel sessions over a named pipe or serial cable connect** - `kd` announces a COM/pipe link
+  with `Kernel Debugger connection established`, not the KDNET `Connected to target ...`. Only the
+  latter was matched, so `open_kd_session` timed out on a target that was in fact attached
+  (#47, #74).
+
+## [1.0.1] - 2026-08-21
+
+A single-line dependency fix, but an important one: every fresh install of 1.0.0 was broken.
+
+### Fixed
+
+- **Installs no longer pull an incompatible `mcp`** - the runtime requirement is now
+  `mcp>=1.28.1,<2.0.0`. `mcp` 2.0.0 renames `McpError` to `MCPError` and drops the low-level
+  `Server.list_tools()` decorator this server registers its tools with, so an unpinned install
+  resolved to 2.x and died at import with
+  `ImportError: cannot import name 'McpError' from 'mcp.shared.exceptions'` (#76). Thanks to
+  @aphroteus for the fix, and to @arjunarjun07 for pinning down the cause.
+
+  If you hit this on 1.0.0, upgrading is the fix: `pip install --upgrade mcp-windbg`. The manual
+  workaround (`pip install "mcp<2"`) is no longer needed.
+
+  Moving to the 2.x server API is tracked in #78.
+
 ## [1.0.0] - 2026-07-16
 
 First stable release, and the one where kernel debugging actually works.

@@ -1,4 +1,5 @@
 import os
+import functools
 import traceback
 import glob
 import winreg
@@ -8,25 +9,29 @@ from typing import Dict, Optional
 from contextlib import asynccontextmanager
 
 from .cdb_session import CDBSession
+from .debug_session import DEFAULT_WAIT_FOR_BREAK_TIMEOUT
 from .kd_session import KDSession
 from .filter_script import FilterScript, load_filter_script
 from .prompts import load_prompt
 
-from mcp.shared.exceptions import McpError
+from mcp.shared.exceptions import MCPError
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import (
-    ErrorData,
     TextContent,
     Tool,
     Prompt,
     PromptArgument,
     PromptMessage,
     GetPromptResult,
+    ListToolsResult,
+    ListPromptsResult,
+    CallToolResult,
     INVALID_PARAMS,
     INTERNAL_ERROR,
 )
+import anyio.to_thread
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -42,6 +47,9 @@ CDB_REMOTE_OPEN_TIMEOUT = 60
 KD_OPEN_TIMEOUT = 60
 CDB_COMMAND_TIMEOUT = 60
 KD_COMMAND_TIMEOUT = 120
+# wait_for_break is not a command timeout: it is how long we are willing to sit
+# on a running target waiting for it to bugcheck or hit a breakpoint.
+WAIT_FOR_BREAK_TIMEOUT = DEFAULT_WAIT_FOR_BREAK_TIMEOUT
 
 
 def _effective_timeout(per_call: Optional[int], tool_default: int, server_timeout: int) -> int:
@@ -69,30 +77,43 @@ def _register_session(session, kind: str, label: str) -> str:
 
 
 def _require_session(session_id: str, kind: str):
-    """Return the session for ``session_id``, or raise a helpful McpError.
+    """Return the session for ``session_id``, or raise a helpful MCPError.
 
     Enforces that the session is of the expected kind so ``run_cdb_command`` on a
     kernel session (or vice versa) fails clearly instead of misbehaving.
     """
     record = _sessions.get(session_id)
     if record is None:
-        raise McpError(ErrorData(
-            code=INVALID_PARAMS,
-            message=(
+        raise MCPError(INVALID_PARAMS, (
                 f"Unknown session_id {session_id!r}. Open a session first - the "
                 f"open_* tools return a session_id to use here."
-            ),
-        ))
+            ))
     if record["kind"] != kind:
         actual = record["kind"]
-        raise McpError(ErrorData(
-            code=INVALID_PARAMS,
-            message=(
+        raise MCPError(INVALID_PARAMS, (
                 f"session_id {session_id!r} is a {actual} session, not {kind}. "
                 f"Use run_{actual}_command / close_{actual}_session for it."
-            ),
-        ))
+            ))
     return record["session"]
+
+
+def _require_live_session(session_id: str, what: str):
+    """Return the session for ``session_id``, requiring a live (non-dump) target.
+
+    Shared by the tools that only make sense against something that runs -
+    ``send_ctrl_break`` and ``wait_for_break`` - and accepts either kind, since a
+    cdb remote and a kd session both have a target to stop.
+    """
+    record = _sessions.get(session_id)
+    if record is None:
+        raise MCPError(INVALID_PARAMS, f"Unknown session_id {session_id!r}. Open a session first.")
+    session = record["session"]
+    if not getattr(session, "is_live_session", False):
+        raise MCPError(INVALID_PARAMS, (
+                f"session_id {session_id!r} is a dump session; there is no "
+                f"running target to {what}."
+            ))
+    return session
 
 
 def _close_session(session_id: str, kind: str) -> bool:
@@ -202,6 +223,12 @@ class SendCtrlBreak(BaseModel):
     session_id: str = Field(description="A live session_id (cdb remote or kd) to break into.")
 
 
+class WaitForBreak(BaseModel):
+    """Parameters for waiting until a resumed target stops."""
+    session_id: str = Field(description="A live session_id (cdb remote or kd) whose target is running.")
+    timeout_seconds: Optional[int] = Field(default=None, description=f"Maximum seconds to wait (default {WAIT_FOR_BREAK_TIMEOUT}). The target stops on a crash/bugcheck, a breakpoint, or a CTRL+BREAK from elsewhere.")
+
+
 def _combine_symbols(per_call: Optional[str], server_default: Optional[str]) -> Optional[str]:
     """Combine per-call and server-default symbol paths."""
     if per_call and server_default:
@@ -307,8 +334,12 @@ def _create_server(
     transport: str = "stdio",
     auto_dump_dir_symbols: bool = True,
 ) -> Server:
-    """Create and configure the MCP server with all tools and prompts."""
-    server = Server("mcp-windbg")
+    """Create and configure the MCP server with all tools and prompts.
+
+    mcp 2.x takes its handlers as constructor arguments rather than through
+    ``@server.<method>()`` decorators, so the server itself is built at the end
+    of this function, once the handlers below exist.
+    """
 
     def filter_tool_arguments(tool_name: str, arguments: dict | None, call_id: str) -> dict:
         if arguments is None:
@@ -322,9 +353,8 @@ def _create_server(
             return content
         return content_filter.process_output(tool_name, content, transport, call_id)
 
-    @server.list_tools()
-    async def list_tools() -> list[Tool]:
-        return [
+    async def on_list_tools(ctx, params) -> ListToolsResult:
+        return ListToolsResult(tools=[
             Tool(
                 name="list_dumps",
                 description="""
@@ -399,10 +429,30 @@ def _create_server(
                 """,
                 inputSchema=SendCtrlBreak.model_json_schema(),
             ),
-        ]
+            Tool(
+                name="wait_for_break",
+                description="""
+                Block until a resumed target stops, and return everything it printed when it did.
+                Use this after letting the target run with 'g' - to catch the bugcheck, the
+                breakpoint report, or the break-in banner. Returns immediately if the target is
+                already stopped. If it is still running when the wait expires, the target is left
+                running: wait again, or halt it with send_ctrl_break.
+                """,
+                inputSchema=WaitForBreak.model_json_schema(),
+            ),
+        ])
 
-    @server.call_tool()
-    async def call_tool(name, arguments: dict) -> list[TextContent]:
+    async def on_call_tool(ctx, params) -> CallToolResult:
+        """Dispatch a tool call and wrap its content in the 2.x result type.
+
+        A raised MCPError still reaches the caller as an error - the SDK turns
+        it into a JSON-RPC error response - so the handlers below keep raising
+        rather than hand-building error results.
+        """
+        content = await _dispatch_tool(params.name, params.arguments or {})
+        return CallToolResult(content=content)
+
+    async def _dispatch_tool(name: str, arguments: dict) -> list[TextContent]:
         try:
             call_id = uuid.uuid4().hex
             arguments = filter_tool_arguments(name, arguments, call_id)
@@ -448,16 +498,16 @@ def _create_server(
             if name == "send_ctrl_break":
                 return filter_tool_content(name, _handle_send_ctrl_break(SendCtrlBreak(**arguments).session_id), call_id)
 
-            raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Unknown tool: {name}"))
+            if name == "wait_for_break":
+                return filter_tool_content(name, await _handle_wait_for_break(WaitForBreak(**arguments)), call_id)
 
-        except McpError:
+            raise MCPError(INVALID_PARAMS, f"Unknown tool: {name}")
+
+        except MCPError:
             raise
         except Exception as e:
             traceback_str = traceback.format_exc()
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message=f"Error executing tool {name}: {str(e)}\n{traceback_str}"
-            ))
+            raise MCPError(INTERNAL_ERROR, f"Error executing tool {name}: {str(e)}\n{traceback_str}")
 
     # -- Tool handlers --------------------------------------------------------
 
@@ -465,12 +515,9 @@ def _create_server(
         args = ListDumps(**arguments)
         directory = args.directory_path or get_local_dumps_path()
         if directory is None:
-            raise McpError(ErrorData(
-                code=INVALID_PARAMS,
-                message="No directory path specified and no default dump path found in registry."
-            ))
+            raise MCPError(INVALID_PARAMS, "No directory path specified and no default dump path found in registry.")
         if not os.path.exists(directory) or not os.path.isdir(directory):
-            raise McpError(ErrorData(code=INVALID_PARAMS, message=f"Directory not found: {directory}"))
+            raise MCPError(INVALID_PARAMS, f"Directory not found: {directory}")
 
         pattern = os.path.join(directory, "**", "*.*dmp") if args.recursive else os.path.join(directory, "*.*dmp")
         dump_files = sorted(glob.glob(pattern, recursive=args.recursive))
@@ -501,7 +548,7 @@ def _create_server(
                 timeout=effective, verbose=verbose, auto_dump_dir_symbols=auto_dump_dir_symbols,
             )
         except Exception as e:
-            raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Failed to open cdb dump session: {e}"))
+            raise MCPError(INTERNAL_ERROR, f"Failed to open cdb dump session: {e}")
 
         session_id = _register_session(session, "cdb", f"dump {args.dump_path}")
         results = [_session_header(session_id, "cdb", f"crash dump {args.dump_path}")]
@@ -523,7 +570,7 @@ def _create_server(
                 symbols_path=effective_symbols, timeout=effective, verbose=verbose,
             )
         except Exception as e:
-            raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Failed to open cdb remote session: {e}"))
+            raise MCPError(INTERNAL_ERROR, f"Failed to open cdb remote session: {e}")
 
         session_id = _register_session(session, "cdb", f"remote {args.connection_string}")
         results = [_session_header(session_id, "cdb", f"remote target {args.connection_string}")]
@@ -545,7 +592,7 @@ def _create_server(
                 symbols_path=effective_symbols, timeout=effective, verbose=verbose,
             )
         except Exception as e:
-            raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Failed to open kd session: {e}"))
+            raise MCPError(INTERNAL_ERROR, f"Failed to open kd session: {e}")
 
         session_id = _register_session(session, "kd", f"kernel {args.connection_string}")
         results = [_session_header(session_id, "kd", f"kernel target {args.connection_string}")]
@@ -570,20 +617,33 @@ def _create_server(
         return [TextContent(type="text", text=f"No active {kind} session found for session_id {session_id}")]
 
     def _handle_send_ctrl_break(session_id) -> list[TextContent]:
-        record = _sessions.get(session_id)
-        if record is None:
-            raise McpError(ErrorData(
-                code=INVALID_PARAMS,
-                message=f"Unknown session_id {session_id!r}. Open a session first."
-            ))
-        session = record["session"]
-        if not getattr(session, "is_live_session", False):
-            raise McpError(ErrorData(
-                code=INVALID_PARAMS,
-                message=f"session_id {session_id!r} is a dump session; there is no running target to break into."
-            ))
+        session = _require_live_session(session_id, "break into")
+        label = _sessions[session_id]["label"]
         session.send_ctrl_break()
-        return [TextContent(type="text", text=f"Sent CTRL+BREAK to session {session_id} ({record['label']}).")]
+        return [TextContent(type="text", text=f"Sent CTRL+BREAK to session {session_id} ({label}).")]
+
+    async def _handle_wait_for_break(args: WaitForBreak) -> list[TextContent]:
+        session = _require_live_session(args.session_id, "wait on")
+        # Deliberately not _effective_timeout: the --timeout floor is about how
+        # long a *command* may take, and has nothing to say about how long you
+        # are willing to sit on a target waiting for it to bugcheck.
+        wait = (
+            args.timeout_seconds
+            if args.timeout_seconds and args.timeout_seconds > 0
+            else WAIT_FOR_BREAK_TIMEOUT
+        )
+        # This blocks for minutes by design. Run it on a worker thread so the
+        # event loop keeps serving - otherwise the server could not answer the
+        # send_ctrl_break this tool's own timeout message tells you to use.
+        output = await anyio.to_thread.run_sync(
+            functools.partial(session.wait_for_break, timeout=wait)
+        )
+        if not output:
+            return [TextContent(type="text", text="Target stopped, printing nothing.")]
+        return [TextContent(
+            type="text",
+            text="Target stopped.\n\nOutput:\n```\n" + "\n".join(output) + "\n```",
+        )]
 
     def _session_header(session_id: str, kind: str, what: str) -> str:
         run_tool = f"run_{kind}_command"
@@ -643,9 +703,8 @@ def _create_server(
         },
     }
 
-    @server.list_prompts()
-    async def list_prompts() -> list[Prompt]:
-        return [
+    async def on_list_prompts(ctx, params) -> ListPromptsResult:
+        return ListPromptsResult(prompts=[
             Prompt(
                 name=name,
                 title=spec["title"],
@@ -659,27 +718,19 @@ def _create_server(
                 ],
             )
             for name, spec in PROMPT_SPECS.items()
-        ]
+        ])
 
-    @server.get_prompt()
-    async def get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
-        if arguments is None:
-            arguments = {}
+    async def on_get_prompt(ctx, params) -> GetPromptResult:
+        name, arguments = params.name, params.arguments or {}
 
         spec = PROMPT_SPECS.get(name)
         if spec is None:
-            raise McpError(ErrorData(
-                code=INVALID_PARAMS,
-                message=f"Unknown prompt: {name}"
-            ))
+            raise MCPError(INVALID_PARAMS, f"Unknown prompt: {name}")
 
         try:
             prompt_content = load_prompt(name)
         except FileNotFoundError as e:
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message=f"Prompt file not found: {e}"
-            ))
+            raise MCPError(INTERNAL_ERROR, f"Prompt file not found: {e}")
 
         target = arguments.get(spec["argument"], "")
         if target:
@@ -700,7 +751,13 @@ def _create_server(
             ],
         )
 
-    return server
+    return Server(
+        "mcp-windbg",
+        on_list_tools=on_list_tools,
+        on_call_tool=on_call_tool,
+        on_list_prompts=on_list_prompts,
+        on_get_prompt=on_get_prompt,
+    )
 
 
 # Clean up function to ensure all sessions are closed when the server exits

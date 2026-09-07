@@ -1,7 +1,7 @@
 # MCP Server for WinDbg Crash Analysis
 
-[![CI](https://github.com/svnscha/mcp-windbg/actions/workflows/ci.yml/badge.svg)](https://github.com/svnscha/mcp-windbg/actions/workflows/ci.yml)
-[![Docs](https://github.com/svnscha/mcp-windbg/actions/workflows/pages.yml/badge.svg)](https://svnscha.github.io/mcp-windbg/)
+[![Fork CI](https://github.com/Williamhao-Y/mcp-windbg/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Williamhao-Y/mcp-windbg/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/github/deployments/svnscha/mcp-windbg/github-pages?label=docs)](https://svnscha.github.io/mcp-windbg/)
 [![PyPI](https://img.shields.io/pypi/v/mcp-windbg)](https://pypi.org/project/mcp-windbg/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D6)
@@ -10,6 +10,12 @@
 A Model Context Protocol server that bridges AI models with WinDbg for crash dump analysis, user-mode remote debugging, and kernel debugging.
 
 <!-- mcp-name: io.github.svnscha/mcp-windbg -->
+
+> [!NOTE]
+> This fork keeps the core package, Claude Code plugin, and hosted documentation aligned with
+> [`svnscha/mcp-windbg`](https://github.com/svnscha/mcp-windbg). The Codex installer,
+> `windbg-analysis` skill, Chinese documentation, and redaction helper are fork-specific additions
+> maintained in [`Williamhao-Y/mcp-windbg`](https://github.com/Williamhao-Y/mcp-windbg).
 
 ## Overview
 
@@ -42,7 +48,7 @@ It is not a magical auto-fix. It is a Python wrapper around `cdb.exe` / `kd.exe`
 
 ## Tools
 
-Every `open_*` tool returns an opaque **`session_id`** (e.g. `cdb-1a2b3c4d`); pass it to the matching `run_*`, `close_*`, and `send_ctrl_break` calls. User-mode targets (dumps and `-remote`) run under `cdb.exe`; kernel targets run under `kd.exe`.
+Every `open_*` tool returns an opaque **`session_id`** (e.g. `cdb-1a2b3c4d`); pass it to the matching `run_*`, `close_*`, `send_ctrl_break`, and `wait_for_break` calls. User-mode targets (dumps and `-remote`) run under `cdb.exe`; kernel targets run under `kd.exe`.
 
 | Tool | Purpose |
 |------|---------|
@@ -55,39 +61,69 @@ Every `open_*` tool returns an opaque **`session_id`** (e.g. `cdb-1a2b3c4d`); pa
 | `close_cdb_session` | Close a user-mode session |
 | `close_kd_session` | Close a kernel session (resumes the target machine) |
 | `send_ctrl_break` | Break into a running live session |
+| `wait_for_break` | Wait for a target you resumed with `g` to stop again |
 
 Parameters, timeouts, and the built-in triage prompts are in the [tools reference](https://svnscha.github.io/mcp-windbg/reference/tools/).
 
 ## Quick start
 
-**Prerequisites**
-
-- Windows with [Debugging Tools for Windows](https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/) or [WinDbg from the Microsoft Store](https://apps.microsoft.com/detail/9pgjgd53tn86), which ship `cdb.exe` and `kd.exe` (auto-detected).
-- Python 3.10 or higher.
-- Any MCP-compatible client (Claude Code, GitHub Copilot, Claude Desktop, Cursor, Windsurf, Cline, ...).
-
 > [!TIP]
 > In enterprise environments, MCP server usage might be restricted by organizational policies. Check with your IT team about AI tool usage and ensure you have the necessary permissions before proceeding.
 
-### Install with Codex (recommended)
+**Prerequisites**
 
-Use the standalone [AI installation prompt](PROMPT-CODEX-INSTALL.md) when you want an AI tool to install this MCP server for Codex in the current working directory. It directs the AI to download `docs/redact.py` into that directory and append its absolute path to the MCP `args` list with `--filter-script`.
+- Windows with [Debugging Tools for Windows](https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/) or [WinDbg from the Microsoft Store](https://apps.microsoft.com/detail/9pgjgd53tn86), which ship `cdb.exe` and `kd.exe` (auto-detected).
+- Any MCP-compatible client (Claude Code, GitHub Copilot, Claude Desktop, Cursor, Windsurf, Cline, ...).
 
-### Manual installation
+Python is not a prerequisite in itself. Each route below states what it needs.
+
+## Install in Claude Code
+
+### The plugin
+
+The shortest path: two lines, no `pip install`, no MCP configuration to edit. Adds four
+skills and a `crash-analyst` agent on top of the ten tools, with symbols preconfigured.
+
+```
+/plugin marketplace add svnscha/mcp-windbg
+/plugin install mcp-windbg-uvx@mcp-windbg
+```
+
+Needs [uv](https://docs.astral.sh/uv/), which supplies `uvx`: `winget install astral-sh.uv`. The
+plugin uses it to fetch the pinned server from PyPI on first use, so there is nothing else to
+install. See the [plugin README](plugins/mcp-windbg/README.md) for symbols and options.
+
+### Registering the server yourself
+
+If you would rather not use the plugin, or you already run the package:
+
+```bash
+pip install mcp-windbg
+claude mcp add mcp-windbg -s user -e _NT_SYMBOL_PATH="SRV*C:\Symbols*https://msdl.microsoft.com/download/symbols" -- python -m mcp_windbg
+```
+
+Needs Python 3.10 or higher. The tools are identical; the skills and the agent are not included.
+
+## Install with Codex
+
+> [!NOTE]
+> This is a fork-specific integration maintained by `Williamhao-Y/mcp-windbg`; it is separate
+> from the upstream Claude Code plugin.
+
+Use the standalone [AI installation prompt](PROMPT-CODEX-INSTALL.md) when you want an AI tool to
+configure this MCP server for Codex in the current working directory. It installs the server,
+downloads the redaction helper, and installs the repository-scoped `windbg-analysis` skill under
+`.agents/skills/windbg-analysis/`.
+
+## Install in another client
 
 ```bash
 pip install mcp-windbg
 ```
 
-**Configure your client.** The two most common setups are below; see the [client configuration guide](https://svnscha.github.io/mcp-windbg/reference/clients/) for Claude Desktop, Copilot CLI, Autohand Code, HTTP, and from-source.
-
-Claude Code - register the server from the command line:
-
-```bash
-claude mcp add mcp-windbg -s user -e _NT_SYMBOL_PATH="SRV*C:\Symbols*https://msdl.microsoft.com/download/symbols" -- python -m mcp_windbg
-```
-
-VS Code (GitHub Copilot) - press `F1` and select **MCP: Open User Configuration** to enable it in every workspace:
+Needs Python 3.10 or higher. Then point the client at `python -m mcp_windbg`. For VS Code
+(GitHub Copilot), press `F1` and select **MCP: Open User Configuration** to enable it in every
+workspace:
 
 ```json
 {
@@ -104,7 +140,12 @@ VS Code (GitHub Copilot) - press `F1` and select **MCP: Open User Configuration*
 }
 ```
 
-Restart your client, then start debugging:
+See the [client configuration guide](https://svnscha.github.io/mcp-windbg/reference/clients/) for
+Claude Desktop, Copilot CLI, Autohand Code, HTTP, and from-source setups.
+
+## Start debugging
+
+Restart your client, then ask for what you want:
 
 ```text
 Analyze the crash dump at C:\dumps\app.dmp

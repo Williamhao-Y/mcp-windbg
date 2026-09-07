@@ -1,6 +1,6 @@
 # mcp-windbg：面向 WinDbg 崩溃分析的 MCP 服务
 
-[![CI](https://github.com/svnscha/mcp-windbg/actions/workflows/ci.yml/badge.svg)](https://github.com/svnscha/mcp-windbg/actions/workflows/ci.yml)
+[![Fork CI](https://github.com/Williamhao-Y/mcp-windbg/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Williamhao-Y/mcp-windbg/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/mcp-windbg)](https://pypi.org/project/mcp-windbg/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D6)
@@ -11,6 +11,11 @@
 > 这不是自动修复工具。它是对 WinDbg/CDB/KD 的 Python 封装，最终诊断结论仍应结合转储、符号和源码人工确认。
 
 <!-- mcp-name: io.github.svnscha/mcp-windbg -->
+
+> 本 fork 的核心服务、Claude Code 插件和在线文档跟随上游
+> [`svnscha/mcp-windbg`](https://github.com/svnscha/mcp-windbg)。Codex 安装提示词、
+> `windbg-analysis` Skill、中文文档和脱敏脚本由
+> [`Williamhao-Y/mcp-windbg`](https://github.com/Williamhao-Y/mcp-windbg) 维护，属于 fork 特有扩展。
 
 ## 能力
 
@@ -27,7 +32,7 @@
 
 - Windows。
 - 已安装 [Debugging Tools for Windows](https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/) 或 Microsoft Store 版 [WinDbg](https://apps.microsoft.com/detail/9pgjgd53tn86)，并具备 `cdb.exe`；使用内核调试还需要 `kd.exe`。
-- Python 3.10 或更高版本。推荐使用 [uv](https://docs.astral.sh/uv/) 安装和管理 **Python 3.12 x64**；它将运行时、虚拟环境和依赖隔离在项目目录内，避免污染系统 Python。除非有明确兼容性验证，不建议优先使用刚发布的 Python 大版本。
+- Python 是否需要预先安装取决于使用方式：pip/手工安装和 Codex 项目隔离方案需要 Python 3.10 或更高版本；Claude Code 插件通过 `uvx` 获取运行环境，只要求安装 [uv](https://docs.astral.sh/uv/)。Codex 项目隔离方案推荐使用 **Python 3.12 x64**，避免污染系统 Python。
 - 一个支持 MCP 的 AI 客户端，例如 Codex、Claude Code、GitHub Copilot、Claude Desktop、Cursor、Windsurf 或 Cline。
 
 服务会尝试自动发现调试器。若调试器路径不在常见位置，建议显式传入 `--cdb-path` 和（需要内核调试时）`--kd-path` 的绝对路径，避免依赖系统 `PATH`。
@@ -36,7 +41,7 @@
 
 ### 使用 Codex 安装（推荐）
 
-需要让 AI 工具在当前工作目录为 Codex 安装本 MCP 时，请使用独立的[AI 安装提示词](PROMPT-CODEX-INSTALL.md)。它会要求 AI 下载 `docs/redact.py` 到当前目录，并将其绝对路径作为 `--filter-script` 追加到 MCP 的 `args` 列表中。
+需要让 AI 工具在当前工作目录为 Codex 安装本 MCP 时，请使用独立的[AI 安装提示词](PROMPT-CODEX-INSTALL.md)。这是 `Williamhao-Y/mcp-windbg` 提供的 fork 特有集成：它会配置 MCP、下载 `docs/redact.py`，并把 `windbg-analysis` Skill 安装到目标项目的 `.agents/skills/windbg-analysis/`。
 
 ### 手动安装
 
@@ -111,6 +116,7 @@ args = [
 | `run_cdb_command` / `run_kd_command` | 对指定会话执行调试命令。 |
 | `close_cdb_session` / `close_kd_session` | 关闭会话；关闭 KD 会话会继续目标机执行。 |
 | `send_ctrl_break` | 中断正在执行的实时调试会话。 |
+| `wait_for_break` | 等待通过 `g` 恢复的实时目标再次停止，并收集停止时的输出。 |
 
 在新开的、已加载此 MCP 的 Codex 会话中，可以直接提出类似请求：
 

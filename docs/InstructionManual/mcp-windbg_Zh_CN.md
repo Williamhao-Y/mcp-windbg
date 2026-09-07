@@ -51,7 +51,7 @@
 ### 3.1 操作系统
 
 - Windows 10、Windows 11 或 Windows Server。
-- Python 3.10 或更高版本。
+- pip/手工安装需要 Python 3.10 或更高版本；Claude Code 插件路线通过 `uvx` 运行，只要求预先安装 `uv`。
 - 一个支持 MCP 的 AI 客户端。
 
 ### 3.2 安装 Windows 调试工具
@@ -177,6 +177,7 @@ _NT_SYMBOL_PATH = "SRV*C:\\Symbols*https://msdl.microsoft.com/download/symbols"
 | `run_cdb_command` | 在用户态调试会话中执行任意 CDB/WinDbg 命令 |
 | `run_kd_command` | 在内核调试会话中执行任意 KD 命令 |
 | `send_ctrl_break` | 中断正在运行的实时调试目标 |
+| `wait_for_break` | 等待通过 `g` 恢复的实时目标再次停止，并返回停止时的输出 |
 | `close_cdb_session` | 关闭用户态调试会话 |
 | `close_kd_session` | 关闭内核调试会话并恢复目标运行 |
 

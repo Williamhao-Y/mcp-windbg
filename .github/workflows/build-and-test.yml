@@ -8,11 +8,6 @@ on:
         required: false
         type: string
         default: '["3.10", "3.11", "3.12", "3.13", "3.14"]'
-      check-version:
-        description: 'Run the version-consistency check (release builds only)'
-        required: false
-        type: boolean
-        default: false
     outputs:
       artifact-name:
         description: 'Name of the build artifact'
@@ -42,6 +37,12 @@ jobs:
     - name: Set up Python ${{ matrix.python-version }}
       run: uv python install ${{ matrix.python-version }}
 
+    # uv.lock is not something release-please knows how to update, so it went
+    # stale for a whole release once without anything noticing. `uv sync` would
+    # quietly refresh it, so check before syncing, not after.
+    - name: Check uv.lock is in step with pyproject.toml
+      run: uv lock --check
+
     - name: Install dependencies
       run: uv sync --dev
 
@@ -65,10 +66,6 @@ jobs:
       run: |
         # Test that the CLI entry point works
         uv run python -m mcp_windbg --help || echo "CLI help command completed"
-
-    - name: Check version consistency
-      if: ${{ inputs.check-version }}
-      run: .\scripts\check-version-consistency.ps1
 
     - name: Validate server.json schema
       run: uv run python scripts/validate-server-schema.py

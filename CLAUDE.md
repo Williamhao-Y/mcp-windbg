@@ -80,9 +80,8 @@ src/mcp_windbg/
   tests/             e2e harness: e2e/ (runner + harness), scenarios/*.yaml, dumps/ (Git LFS)
 scripts/             check-version-consistency.ps1, validate-server-schema.py, Format-Docs.ps1
 examples/            small C++ programs that crash, for generating test dumps
-docs/                MkDocs user guide (Material), deployed to GitHub Pages
-.github/workflows/   ci.yml -> build-and-test.yml (tests), publish-mcp.yml (PyPI on v* tags),
-                     pages.yml (docs deploy)
+docs/                MkDocs user guide (Material), built locally when needed
+.github/workflows/   ci.yml -> build-and-test.yml (tests), dependency-canary.yml (scheduled)
 pyproject.toml       project + dependency config         server.json   MCP registry manifest
 ```
 
@@ -99,18 +98,28 @@ matching file:
 Tool and CLI facts come from `src/mcp_windbg/server.py` (tool schemas) and
 `src/mcp_windbg/__init__.py` (command-line options). Keep `docs/reference/` in sync with them.
 
-## Versioning and release
+**The plugin has two names, and they do different jobs.** The marketplace entry in
+`.claude-plugin/marketplace.json` is named `mcp-windbg-uvx` - that is the install identity, so
+the command is `/plugin install mcp-windbg-uvx@mcp-windbg`, and it is what the plugin cache
+directory is named after. The `name` in `plugins/mcp-windbg/.claude-plugin/plugin.json` stays
+`mcp-windbg`, and that is what skills and MCP tools are scoped by: `/mcp-windbg:analyze-dump` and
+`mcp__plugin_mcp-windbg_mcp-windbg__<tool>`, whatever the entry is called.
 
-The version lives in three places that must agree: `pyproject.toml` (`version`), `server.json`
-(top-level `version` and every `packages[*].version`), and the top `## [x.y.z]` heading in
-`CHANGELOG.md`. Day-to-day work lands under a `## [Unreleased]` heading; the version-
-consistency check (`scripts/check-version-consistency.ps1`) only runs on release builds, so
-`main` may sit at `[Unreleased]`.
+That split is deliberate. It lets a second entry ship the same plugin a different way -
+`mcp-windbg-native` for a bundled binary, `mcp-windbg-pipx` for `pipx run` - while every variant
+keeps identical skill names, identical tool names, and one set of documentation. Change
+`plugin.json`'s name and you rename every skill and every tool with it.
 
-To release: bump all three to the new version, set the CHANGELOG date, then tag `vX.Y.Z` and
-push. `publish-mcp.yml` runs the tests, builds, publishes to PyPI, and creates the GitHub
-release; that workflow runs the consistency check (it calls build-and-test with
-`check-version: true`).
+## Fork workflow
+
+This fork uses `main` as its working branch. Pull requests and pushes to `main` run the reusable
+test workflow through `.github/workflows/ci.yml`; the dependency canary remains available on its
+schedule and through manual dispatch.
+
+There is no automated release, package publication, MCP Registry publication, or GitHub Pages
+deployment in this fork. Upstream releases are synchronized manually. When version-bearing files
+are changed by hand, run `scripts/check-version-consistency.ps1` to compare `pyproject.toml`,
+`server.json`, the Claude plugin manifests, the plugin's `uvx` pin, and the top CHANGELOG entry.
 
 ## Docs
 

@@ -179,4 +179,4 @@ mcp-publisher.exe
 
 # MkDocs build output
 /site/
-*.vscode/
+/.vscode/
